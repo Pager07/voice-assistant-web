@@ -3,7 +3,8 @@ import React, { useState, useEffect, useRef, ChangeEvent } from "react";
 import axios from "axios";
 import { motion } from "framer-motion";
 import toast from "react-hot-toast";
-import {textToSpeechInputStreaming} from "@/app/actions";
+import {textToSpeechInputStreaming,endConversation,startConversation,handlePrompt} from "@/app/actions";
+import { ConversationManager } from "@/lib/utils/conversation-manager";
 import { useAudioRecorder } from "@/lib/hooks/useAudioRecorder";
 import { readStreamableValue } from "ai/rsc";
 import {speechToText} from "@/lib/utils/speech-to-text";
@@ -21,12 +22,22 @@ interface TextToSpeechData {
 
 const AssistantButton: React.FC = () => {
 		const nextPlayTime = useRef<number>(0);
-		const audioContext = useRef<AudioContext | null>();
-
+		const [conversationManager, setConversationManager] = useState<ConversationManager | null>(null);		const audioContext = useRef<AudioContext | null>();
 		const [generation, setGeneration] = useState<string>("");
 		useEffect(() => {
 				audioContext.current = new (window.AudioContext ||
 						(window as any).webkitAudioContext)();
+				    const handleUnload = async () => {
+							  if (conversationManager) {
+								await endConversation(conversationManager);
+							  }
+					};
+				window.addEventListener("beforeunload", handleUnload)
+				window.addEventListener("unload", handleUnload)
+				return () => {
+						window.removeEventListener("beforeunload", handleUnload)
+						window.removeEventListener("unload", handleUnload)
+				}
 
 		}, []);
 
@@ -85,11 +96,17 @@ const AssistantButton: React.FC = () => {
 
 		  const textToSpeechHandler = async (userPrompt:string) => {
 					console.log('calling textToSpeechHandler')
-					const { tts } = await textToSpeechInputStreaming(
-					  "21m00Tcm4TlvDq8ikWAM",
-					  userPrompt
-					);
-				  console.log('called textToSpeechHandler')
+					// const { tts } = await textToSpeechInputStreaming(
+					//   "21m00Tcm4TlvDq8ikWAM",
+					//   userPrompt
+					// );
+				  if (!conversationManager) {
+						  const newConversationManager= await startConversation();
+						  setConversationManager(newConversationManager)
+				  }
+				  const { tts } = await handlePrompt(
+						  userPrompt,conversationManager!
+				  );
 					if (tts == null) {
 					  console.log("output is null");
 					} else {
@@ -120,13 +137,6 @@ const AssistantButton: React.FC = () => {
 				// combine multiple blob parts into a single blob
 				const audioBlob = new Blob(audioChunks, { type: "audio/webm" });
 
-				// test that blob is playable by creating a URL and playing with an audio element
-				const audioUrl = URL.createObjectURL(audioBlob);
-				const audio = new Audio(audioUrl);
-				audio.onerror = (error) => {
-						console.error('audio error:',error)
-				}
-
 				// pass the blob to the server for speech-to-text conversion
 				const text = await speechToText(audioBlob)
 				console.log('text:',text)
@@ -150,6 +160,13 @@ const AssistantButton: React.FC = () => {
 				}
 		}
 
+		  const endConversationHandler = async () => {
+				if(conversationManager){
+						await endConversation(conversationManager);
+						setConversationManager(null);
+				}
+		  };
+
 		const dummy = async () => {console.log('dummy handler pressed')}
 		return (
 				<div>
@@ -160,6 +177,9 @@ const AssistantButton: React.FC = () => {
 										Ask
 								</button>
 
+								<button onClick={endConversationHandler} disabled={!conversationManager}>
+										End Conversation
+								</button>
 								<div>{generation}</div>
 						</div>
 				</div>
